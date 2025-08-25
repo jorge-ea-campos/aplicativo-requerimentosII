@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 from io import BytesIO
 from datetime import datetime
+from PyPDF2 import PdfReader
 
 # --- Constantes ---
 # Nomes de colunas para evitar "magic strings" e facilitar a manutenção
@@ -244,18 +245,30 @@ def display_charts(metrics):
             fig2.update_layout(xaxis_title="Período", yaxis_title="Nº de Pedidos")
             st.plotly_chart(fig2, use_container_width=True)
 
-def display_student_details(df_requerimentos, df_merged):
+def display_student_details(df_requerimentos, df_merged, uploaded_hes):
     """Exibe a seção interativa de detalhes por aluno."""
     st.markdown("### 📋 Análise de Requerimentos por Aluno")
     st.info("Clique no nome para ver o histórico e dar o parecer nos pedidos atuais.")
     
-    # CORREÇÃO: Garante que cada aluno (por NUSP) seja processado apenas uma vez.
     alunos_unicos = df_requerimentos[[COL_NUSP, COL_NOME]].drop_duplicates(subset=[COL_NUSP]).sort_values(COL_NOME)
 
     for _, aluno in alunos_unicos.iterrows():
         nusp_aluno = aluno[COL_NUSP]
         with st.expander(f"👤 {aluno[COL_NOME]} (NUSP: {nusp_aluno})"):
             current_requests = df_requerimentos[df_requerimentos[COL_NUSP] == nusp_aluno]
+            
+            # --- NOVO: Exibição do Histórico Escolar em PDF ---
+            he_file = uploaded_hes.get(nusp_aluno)
+            if he_file:
+                with st.expander("🔍 Visualizar Histórico Escolar (Texto Extraído)"):
+                    try:
+                        pdf_reader = PdfReader(he_file)
+                        text = ""
+                        for page in pdf_reader.pages:
+                            text += page.extract_text() + "\n--- Próxima Página ---\n"
+                        st.text_area("Conteúdo do HE", text, height=300, key=f"he_text_{nusp_aluno}")
+                    except Exception as e:
+                        st.error(f"Não foi possível ler o arquivo PDF do histórico. Erro: {e}")
             
             st.markdown("##### 📌 Requerimento(s) no Semestre Atual para Análise")
             if current_requests.empty:
@@ -266,11 +279,9 @@ def display_student_details(df_requerimentos, df_merged):
                     plano_estudo_link = request.get(COL_PLANO, "")
                     plano_presenca_link = request.get(COL_PLANO_PRESENCA, "")
                     
-                    # A chave agora usa apenas o índice, que é garantido ser único.
                     decision_key = f"req_{index}"
                     st.session_state.decisions.setdefault(decision_key, {'status': 'Pendente', 'justificativa': ''})
                     
-                    # O problema é exibido, mas não usado na chave para evitar colisões com NaN
                     problema_display = request.get('problema_atual', 'Não especificado')
                     st.markdown(f"**Problema/Pedido:** `{problema_display}`")
 
@@ -324,7 +335,7 @@ def display_student_details(df_requerimentos, df_merged):
                     st.divider()
 
             historico_aluno = df_merged[df_merged[COL_NUSP] == nusp_aluno].copy()
-            st.markdown("##### 📜 Histórico Completo de Pedidos")
+            st.markdown("##### 📜 Histórico de Pedidos de Requerimento")
             
             if not historico_aluno.empty and not historico_aluno['disciplina_historico'].isnull().all():
                 historico_aluno['problema_formatado'] = historico_aluno['problema_historico'].apply(format_problem_type)
@@ -333,7 +344,7 @@ def display_student_details(df_requerimentos, df_merged):
                 df_hist_display = historico_aluno[cols_hist].rename(columns=lambda c: c.replace('_historico', '').replace('_formatado',''))
                 st.dataframe(df_hist_display, hide_index=True, use_container_width=True)
             else:
-                st.info("Este aluno não possui histórico de pedidos anteriores.")
+                st.info("Este aluno não possui histórico de pedidos de requerimento anteriores.")
 
 
 # --- Funções de Exportação ---
@@ -346,7 +357,6 @@ def prepare_export_data(df_req, decisions):
     if COL_OBSERVACAO_SG not in df_export.columns:
         df_export[COL_OBSERVACAO_SG] = ""
 
-    # A chave de decisão agora é baseada apenas no índice
     df_export['decision_key'] = "req_" + df_export.index.astype(str)
     df_export['parecer_temp'] = df_export['decision_key'].map(lambda k: decisions.get(k, {}).get('status', 'Pendente'))
     df_export['justificativa_temp'] = df_export['decision_key'].map(lambda k: decisions.get(k, {}).get('justificativa', ''))
@@ -383,19 +393,24 @@ def run_app():
 
     with st.sidebar:
         st.header("📁 Upload de Arquivos")
-        file_consolidado = st.file_uploader("**Histórico de Pedidos (consolidado)**", type=["xlsx", "csv"])
-        file_requerimentos = st.file_uploader("**Pedidos do Semestre Atual (requerimentos)**", type=["xlsx", "csv"])
+        file_consolidado = st.file_uploader("**1. Histórico de Pedidos (consolidado)**", type=["xlsx", "csv"])
+        file_requerimentos = st.file_uploader("**2. Pedidos do Semestre Atual**", type=["xlsx", "csv"])
+        files_he = st.file_uploader(
+            "**3. Históricos Escolares (PDF)**", 
+            type="pdf", 
+            accept_multiple_files=True,
+            help="Nomeie cada arquivo com o NUSP do aluno (ex: 12345678.pdf)"
+        )
         st.info("💡 Os arquivos devem ter uma coluna com o número USP.")
         with st.expander("⚙️ Configurações Avançadas"):
             show_debug = st.checkbox("Mostrar informações de debug", value=False)
 
     if not (file_consolidado and file_requerimentos):
-        st.markdown("### 🚀 Bem-vindo! Para começar, faça o upload dos arquivos.")
+        st.markdown("### 🚀 Bem-vindo! Para começar, faça o upload dos arquivos 1 e 2.")
         with st.expander("📋 Estrutura esperada dos arquivos"):
             st.markdown(f"**Consolidado:** `{', '.join(REQUIRED_COLS_CONSOLIDADO)}`")
             st.markdown(f"**Requerimentos:** `{', '.join(REQUIRED_COLS_REQUERIMENTOS)}`")
-            st.markdown("> A coluna `link_requerimento` deve conter o link (geralmente da coluna G da planilha original).")
-            st.markdown("> As colunas `plano_estudo` e `plano_presenca` devem conter os links para os respectivos documentos.")
+            st.markdown("> As colunas `plano_estudo` e `plano_presenca` devem conter os links para os documentos.")
         return
 
     try:
@@ -403,6 +418,16 @@ def run_app():
             df_consolidado = load_data(file_consolidado)
             df_requerimentos = load_data(file_requerimentos)
             if df_consolidado is None or df_requerimentos is None: st.stop()
+
+            # --- NOVO: Processamento dos PDFs de Histórico Escolar ---
+            uploaded_hes = {}
+            if files_he:
+                for file in files_he:
+                    try:
+                        nusp = int(file.name.split('.')[0])
+                        uploaded_hes[nusp] = file
+                    except (ValueError, IndexError):
+                        st.warning(f"Não foi possível extrair o NUSP do nome do arquivo: {file.name}. O arquivo deve ser nomeado como 'NUMEROUSP.pdf'.")
 
             if show_debug:
                 with st.expander("🔍 Debug - Colunas originais"):
@@ -440,7 +465,7 @@ def run_app():
         if not df_merged_with_history.empty:
             display_charts(metrics)
         st.divider()
-        display_student_details(df_requerimentos, df_merged)
+        display_student_details(df_requerimentos, df_merged, uploaded_hes)
         st.divider()
 
         st.markdown("### 📥 Exportar Relatórios")
@@ -464,15 +489,11 @@ def run_app():
         if show_debug: st.exception(e)
 
 # --- Ponto de Entrada e Autenticação ---
-# CORREÇÃO: Lógica de autenticação refatorada para evitar erro de form duplicado.
-
-# Inicializa o estado da sessão se não existir
 if "password_correct" not in st.session_state:
     st.session_state["password_correct"] = False
 
-# Se o usuário não estiver logado, mostra o formulário de login
 if not st.session_state["password_correct"]:
-    st.title("🔒 Acesso Restrito")
+    st.title("� Acesso Restrito")
     try:
         correct_password = st.secrets["passwords"]["senha_mestra"]
     except (AttributeError, KeyError):
@@ -488,7 +509,6 @@ if not st.session_state["password_correct"]:
                     st.rerun()
                 else:
                     st.error("Senha incorreta.")
-# Se o usuário estiver logado, executa o aplicativo principal
 else:
     run_app()
-
+�
