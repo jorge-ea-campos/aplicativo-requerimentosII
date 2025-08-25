@@ -40,9 +40,41 @@ if 'decisions' not in st.session_state:
 # --- CSS Customizado ---
 st.markdown("""
 <style>
+    /* Estilos do Cabeçalho de Identidade Visual */
+    .header-container {
+        margin-bottom: 2rem;
+    }
+    .logo-and-title {
+        display: flex;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+    .header-logo {
+        height: 70px;
+        margin-right: 20px;
+    }
+    .header-title-text {
+        display: flex;
+        flex-direction: column;
+    }
+    .university-name {
+        font-size: 1.7rem;
+        font-weight: bold;
+        color: #333;
+    }
+    .department-name {
+        font-size: 1.3rem;
+        color: #0072b5;
+    }
+    .color-bar-yellow { height: 8px; background-color: #FDB913; }
+    .color-bar-lightblue { height: 4px; background-color: #89cff0; }
+    .color-bar-darkblue { height: 12px; background-color: #003366; }
+
+    /* Estilo do cabeçalho principal do App */
     .main-header {
         font-size: 2.5rem; color: #1f77b4; text-align: center;
         padding: 1rem 0; border-bottom: 3px solid #1f77b4; margin-bottom: 2rem;
+        margin-top: 0;
     }
     .metric-card {
         background-color: #f0f2f6; padding: 1.5rem; border-radius: 10px;
@@ -325,6 +357,24 @@ def prepare_export_data(df_req, decisions):
 
 # --- Função Principal da Aplicação ---
 def run_app():
+    # --- Cabeçalho de Identidade Visual ---
+    st.markdown("""
+        <div class="header-container">
+            <div class="logo-and-title">
+                <img src="http://googleusercontent.com/file_content/2" class="header-logo">
+                <div class="header-title-text">
+                    <span class="university-name">Universidade de São Paulo</span>
+                    <span class="department-name">Serviço de Graduação - FZEA</span>
+                </div>
+            </div>
+            <div class="color-bar-container">
+                <div class="color-bar-yellow"></div>
+                <div class="color-bar-lightblue"></div>
+                <div class="color-bar-darkblue"></div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
     st.markdown('<h1 class="main-header">📋 Sistema de Conferência de Requerimentos</h1>', unsafe_allow_html=True)
 
     with st.sidebar:
