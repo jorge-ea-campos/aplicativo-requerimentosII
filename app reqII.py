@@ -292,9 +292,13 @@ def run_app():
             df_consolidado = find_and_rename_columns(df_consolidado, COL_NUSP, possible_nusp, {COL_PROBLEMA: COL_PROBLEMA})
             df_requerimentos = find_and_rename_columns(df_requerimentos, COL_NUSP, possible_nusp, {
                 COL_PROBLEMA: COL_PROBLEMA,
+                # Adicionando variações de nomes de coluna encontrados na planilha do usuário
                 "link para o requerimento": COL_LINK,
+                "links pedidos requerimento": COL_LINK,
                 "plano de estudo": COL_PLANO,
-                "plano de presença": COL_PLANO
+                "link plano de estudos": COL_PLANO,
+                "plano de presença": COL_PLANO,
+                "link plano de presença": COL_PLANO
             })
             validate_dataframes(df_consolidado, df_requerimentos)
             
@@ -362,4 +366,3 @@ if st.session_state["password_correct"]:
     run_app()
 else:
     login_form()
-    
