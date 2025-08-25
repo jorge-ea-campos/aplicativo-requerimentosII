@@ -15,11 +15,12 @@ COL_ANO = "Ano"
 COL_SEMESTRE = "Semestre"
 COL_LINK = "link_requerimento"
 COL_PLANO = "plano_estudo"
+COL_PLANO_PRESENCA = "plano_presenca" # Nova constante
 
 
 # Colunas obrigatórias nos arquivos de entrada
 REQUIRED_COLS_CONSOLIDADO = [COL_NUSP, COL_DISCIPLINA, COL_ANO, COL_SEMESTRE, COL_PROBLEMA, COL_PARECER]
-REQUIRED_COLS_REQUERIMENTOS = [COL_NUSP, COL_NOME, COL_PROBLEMA, COL_LINK, COL_PLANO]
+REQUIRED_COLS_REQUERIMENTOS = [COL_NUSP, COL_NOME, COL_PROBLEMA, COL_LINK, COL_PLANO, COL_PLANO_PRESENCA]
 
 # --- Configuração da Página e Estado da Sessão ---
 st.set_page_config(
@@ -233,7 +234,8 @@ def display_student_details(df_requerimentos, df_merged):
                 for index, request in current_requests.iterrows():
                     problema = request['problema_atual']
                     link = request.get(COL_LINK, "")
-                    plano = request.get(COL_PLANO, "")
+                    plano_estudo_link = request.get(COL_PLANO, "")
+                    plano_presenca_link = request.get(COL_PLANO_PRESENCA, "")
                     
                     decision_key = f"{nusp_aluno}_{problema}_{index}"
                     st.session_state.decisions.setdefault(decision_key, {'status': 'Pendente', 'justificativa': ''})
@@ -245,11 +247,16 @@ def display_student_details(df_requerimentos, df_merged):
                     else:
                         st.markdown("**🔗 Link para o Requerimento:** Não informado")
 
-                    if pd.notna(plano) and str(plano).strip():
-                        with st.expander("📄 Ver Plano de Estudo/Presença"):
-                            st.text(plano)
+                    # ALTERAÇÃO: Exibe links para os planos
+                    if pd.notna(plano_estudo_link) and str(plano_estudo_link).strip():
+                        st.markdown(f"**📄 Link para o Plano de Estudo:** [Acessar Documento]({plano_estudo_link})")
                     else:
-                        st.markdown("**📄 Plano de Estudo/Presença:** Não informado")
+                        st.markdown("**📄 Plano de Estudo:** Não informado")
+                    
+                    if pd.notna(plano_presenca_link) and str(plano_presenca_link).strip():
+                        st.markdown(f"**📋 Link para o Plano de Presença:** [Acessar Documento]({plano_presenca_link})")
+                    else:
+                        st.markdown("**📋 Plano de Presença:** Não informado")
                     
                     parecer_options = ('Pendente', 'Deferido SG', 'Indeferido SG', 'Para análise COC.')
                     # Garante que o status antigo seja compatível
@@ -308,7 +315,7 @@ def run_app():
             st.markdown(f"**Consolidado:** `{', '.join(REQUIRED_COLS_CONSOLIDADO)}`")
             st.markdown(f"**Requerimentos:** `{', '.join(REQUIRED_COLS_REQUERIMENTOS)}`")
             st.markdown("> A coluna `link_requerimento` deve conter o link (geralmente da coluna G da planilha original).")
-            st.markdown("> A coluna `plano_estudo` deve conter os planos de estudo/presença.")
+            st.markdown("> As colunas `plano_estudo` e `plano_presenca` devem conter os links para os respectivos documentos.")
         return
 
     try:
@@ -326,13 +333,12 @@ def run_app():
             df_consolidado = find_and_rename_columns(df_consolidado, COL_NUSP, possible_nusp, {COL_PROBLEMA: COL_PROBLEMA})
             df_requerimentos = find_and_rename_columns(df_requerimentos, COL_NUSP, possible_nusp, {
                 COL_PROBLEMA: COL_PROBLEMA,
-                # Adicionando variações de nomes de coluna encontrados na planilha do usuário
                 "link para o requerimento": COL_LINK,
                 "links pedidos requerimento": COL_LINK,
                 "plano de estudo": COL_PLANO,
                 "link plano de estudos": COL_PLANO,
-                "plano de presença": COL_PLANO,
-                "link plano de presença": COL_PLANO
+                "plano de presença": COL_PLANO_PRESENCA,
+                "link plano de presença": COL_PLANO_PRESENCA
             })
             validate_dataframes(df_consolidado, df_requerimentos)
             
