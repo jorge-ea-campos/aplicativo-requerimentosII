@@ -164,19 +164,19 @@ def clean_nusp_column(df, file_name):
 
 # --- Funções de Análise e Métricas ---
 
-def calculate_metrics(df_merged):
+def calculate_metrics(df_merged_with_history):
     """Calcula métricas adicionais a partir do DataFrame com histórico."""
     metrics = {}
-    if df_merged.empty: return metrics
-    pareceres = df_merged['parecer_historico'].str.lower()
+    if df_merged_with_history.empty: return metrics
+    pareceres = df_merged_with_history['parecer_historico'].str.lower()
     aprovados = pareceres.str.contains('aprovado', na=False) & ~pareceres.str.contains('indeferido|negado', na=False)
     negados = pareceres.str.contains('indeferido|negado', na=False)
     total_com_parecer = aprovados.sum() + negados.sum()
     metrics['taxa_aprovacao'] = (aprovados.sum() / total_com_parecer * 100) if total_com_parecer > 0 else 0
-    metrics['top_disciplinas'] = df_merged['disciplina_historico'].value_counts().head(5)
-    if 'Ano_historico' in df_merged.columns and 'Semestre_historico' in df_merged.columns:
-        df_merged['periodo'] = df_merged['Ano_historico'].astype(str) + '/' + df_merged['Semestre_historico'].astype(str)
-        metrics['distribuicao_temporal'] = df_merged['periodo'].value_counts().sort_index()
+    metrics['top_disciplinas'] = df_merged_with_history['disciplina_historico'].value_counts().head(5)
+    if 'Ano_historico' in df_merged_with_history.columns and 'Semestre_historico' in df_merged_with_history.columns:
+        df_merged_with_history['periodo'] = df_merged_with_history['Ano_historico'].astype(str) + '/' + df_merged_with_history['Semestre_historico'].astype(str)
+        metrics['distribuicao_temporal'] = df_merged_with_history['periodo'].value_counts().sort_index()
     return metrics
 
 # --- Funções de Formatação e Exibição (UI) ---
@@ -212,17 +212,17 @@ def to_excel(df):
             worksheet.set_column(i, i, min(width, 50))
     return output.getvalue()
 
-def display_metrics(df_req, df_merged, metrics):
+def display_metrics(df_req, df_merged_with_history, metrics):
     """Exibe os cartões de métricas principais."""
     st.markdown("### 📊 Métricas Principais")
     cols = st.columns(5)
     with cols[0]: st.metric("Total de Requerimentos", len(df_req))
-    alunos_unicos_hist = df_merged[COL_NUSP].nunique()
+    alunos_unicos_hist = df_merged_with_history[COL_NUSP].nunique()
     total_alunos_req = df_req[COL_NUSP].nunique()
     percentual_hist = (alunos_unicos_hist / total_alunos_req * 100) if total_alunos_req > 0 else 0
     with cols[1]: st.metric("Alunos com Histórico", alunos_unicos_hist, f"{percentual_hist:.1f}%")
-    with cols[2]: st.metric("Quebras de Requisito (Hist.)", (df_merged["problema_historico"].str.upper() == "QR").sum())
-    with cols[3]: st.metric("Conflitos de Horário (Hist.)", (df_merged["problema_historico"].str.upper() == "CH").sum())
+    with cols[2]: st.metric("Quebras de Requisito (Hist.)", (df_merged_with_history["problema_historico"].str.upper() == "QR").sum())
+    with cols[3]: st.metric("Conflitos de Horário (Hist.)", (df_merged_with_history["problema_historico"].str.upper() == "CH").sum())
     with cols[4]: st.metric("Taxa de Aprovação (Hist.)", f"{metrics.get('taxa_aprovacao', 0):.1f}%")
 
 def display_charts(metrics):
@@ -249,7 +249,8 @@ def display_student_details(df_requerimentos, df_merged):
     st.markdown("### 📋 Análise de Requerimentos por Aluno")
     st.info("Clique no nome para ver o histórico e dar o parecer nos pedidos atuais.")
     
-    alunos_unicos = df_merged[[COL_NUSP, COL_NOME]].drop_duplicates().sort_values(COL_NOME)
+    # ALTERAÇÃO: Itera sobre todos os alunos do arquivo de requerimentos
+    alunos_unicos = df_requerimentos[[COL_NUSP, COL_NOME]].drop_duplicates().sort_values(COL_NOME)
 
     for _, aluno in alunos_unicos.iterrows():
         nusp_aluno = aluno[COL_NUSP]
@@ -320,13 +321,20 @@ def display_student_details(df_requerimentos, df_merged):
                     
                     st.divider()
 
+            # Lógica para exibir o histórico
             historico_aluno = df_merged[df_merged[COL_NUSP] == nusp_aluno].copy()
             st.markdown("##### 📜 Histórico Completo de Pedidos")
-            historico_aluno['problema_formatado'] = historico_aluno['problema_historico'].apply(format_problem_type)
-            historico_aluno['parecer_formatado'] = historico_aluno['parecer_historico'].apply(format_parecer)
-            cols_hist = ['disciplina_historico', 'Ano_historico', 'Semestre_historico', 'problema_formatado', 'parecer_formatado']
-            df_hist_display = historico_aluno[cols_hist].rename(columns=lambda c: c.replace('_historico', '').replace('_formatado',''))
-            st.dataframe(df_hist_display, hide_index=True, use_container_width=True)
+            
+            # ALTERAÇÃO: Verifica se o histórico não está vazio
+            if not historico_aluno.empty and not historico_aluno['disciplina_historico'].isnull().all():
+                historico_aluno['problema_formatado'] = historico_aluno['problema_historico'].apply(format_problem_type)
+                historico_aluno['parecer_formatado'] = historico_aluno['parecer_historico'].apply(format_parecer)
+                cols_hist = ['disciplina_historico', 'Ano_historico', 'Semestre_historico', 'problema_formatado', 'parecer_formatado']
+                df_hist_display = historico_aluno[cols_hist].rename(columns=lambda c: c.replace('_historico', '').replace('_formatado',''))
+                st.dataframe(df_hist_display, hide_index=True, use_container_width=True)
+            else:
+                st.info("Este aluno não possui histórico de pedidos anteriores.")
+
 
 # --- Funções de Exportação ---
 def prepare_export_data(df_req, decisions):
@@ -334,23 +342,19 @@ def prepare_export_data(df_req, decisions):
     atualizando as colunas J (Parecer) e K (Observação)."""
     df_export = df_req.copy()
 
-    # Garante que as colunas de destino existam, preenchendo com os valores originais se disponíveis
     if COL_PARECER_SG not in df_export.columns:
         df_export[COL_PARECER_SG] = ""
     if COL_OBSERVACAO_SG not in df_export.columns:
         df_export[COL_OBSERVACAO_SG] = ""
 
-    # Cria colunas temporárias para mapear as decisões da sessão
     df_export['decision_key'] = df_export[COL_NUSP].astype(str) + '_' + df_export['problema_atual'].astype(str) + '_' + df_export.index.astype(str)
     df_export['parecer_temp'] = df_export['decision_key'].map(lambda k: decisions.get(k, {}).get('status', 'Pendente'))
     df_export['justificativa_temp'] = df_export['decision_key'].map(lambda k: decisions.get(k, {}).get('justificativa', ''))
 
-    # Atualiza as colunas de destino apenas onde uma decisão foi tomada na sessão
     mask = df_export['parecer_temp'] != 'Pendente'
     df_export.loc[mask, COL_PARECER_SG] = df_export.loc[mask, 'parecer_temp']
     df_export.loc[mask, COL_OBSERVACAO_SG] = df_export.loc[mask, 'justificativa_temp']
 
-    # Remove colunas temporárias antes de exportar
     df_export = df_export.drop(columns=['decision_key', 'parecer_temp', 'justificativa_temp'])
     
     return df_export
@@ -415,7 +419,6 @@ def run_app():
                 "link plano de estudos": COL_PLANO,
                 "plano de presença": COL_PLANO_PRESENCA,
                 "link plano de presença": COL_PLANO_PRESENCA,
-                # Adiciona o mapeamento para a coluna de observação existente
                 "observação sg": COL_OBSERVACAO_SG
             })
             validate_dataframes(df_consolidado, df_requerimentos)
@@ -427,34 +430,36 @@ def run_app():
             df_consolidado.rename(columns=cols_hist, inplace=True)
             df_requerimentos.rename(columns={COL_PROBLEMA: 'problema_atual'}, inplace=True)
 
-            df_merged = df_requerimentos.merge(df_consolidado, on=COL_NUSP, how="inner")
-            metrics = calculate_metrics(df_merged)
-
-        if not df_merged.empty:
-            display_metrics(df_requerimentos, df_merged, metrics)
-            st.divider()
-            display_charts(metrics)
-            st.divider()
-            display_student_details(df_requerimentos, df_merged)
-            st.divider()
-
-            st.markdown("### 📥 Exportar Relatórios")
-            df_com_pareceres = prepare_export_data(df_requerimentos, st.session_state.decisions)
+            # ALTERAÇÃO: Usa 'left' merge para manter todos os alunos do semestre atual
+            df_merged = df_requerimentos.merge(df_consolidado, on=COL_NUSP, how="left")
             
-            # Filtra o dataframe final com base na coluna de parecer do SG
-            df_nao_indeferidos = df_com_pareceres[df_com_pareceres[COL_PARECER_SG] != 'Indeferido SG'].copy()
+            # Para métricas, usamos apenas os que têm histórico
+            df_merged_with_history = df_merged.dropna(subset=['disciplina_historico'])
+            metrics = calculate_metrics(df_merged_with_history)
 
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("##### Relatório Completo com Pareceres")
-                st.download_button(label="📥 Baixar como Excel", data=to_excel(df_com_pareceres),
-                                   file_name=f"relatorio_completo_pareceres_{datetime.now().strftime('%Y%m%d')}.xlsx")
-            with col2:
-                st.markdown("##### Relatório de Pedidos Não Indeferidos")
-                st.download_button(label="📥 Baixar como Excel", data=to_excel(df_nao_indeferidos),
-                                   file_name=f"relatorio_nao_indeferidos_{datetime.now().strftime('%Y%m%d')}.xlsx")
-        else:
-            st.success("✅ Nenhum aluno do semestre atual foi encontrado no histórico de pedidos.")
+        # A exibição principal agora usa o df_merged completo
+        display_metrics(df_requerimentos, df_merged_with_history, metrics)
+        st.divider()
+        if not df_merged_with_history.empty:
+            display_charts(metrics)
+        st.divider()
+        display_student_details(df_requerimentos, df_merged)
+        st.divider()
+
+        st.markdown("### 📥 Exportar Relatórios")
+        df_com_pareceres = prepare_export_data(df_requerimentos, st.session_state.decisions)
+        
+        df_nao_indeferidos = df_com_pareceres[df_com_pareceres[COL_PARECER_SG] != 'Indeferido SG'].copy()
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("##### Relatório Completo com Pareceres")
+            st.download_button(label="📥 Baixar como Excel", data=to_excel(df_com_pareceres),
+                                file_name=f"relatorio_completo_pareceres_{datetime.now().strftime('%Y%m%d')}.xlsx")
+        with col2:
+            st.markdown("##### Relatório de Pedidos Não Indeferidos")
+            st.download_button(label="📥 Baixar como Excel", data=to_excel(df_nao_indeferidos),
+                                file_name=f"relatorio_nao_indeferidos_{datetime.now().strftime('%Y%m%d')}.xlsx")
 
     except ValueError as e: st.error(f"❌ **Erro de Validação:**\n\n{e}")
     except Exception as e:
@@ -463,7 +468,7 @@ def run_app():
 
 # --- Ponto de Entrada e Autenticação ---
 def login_form():
-    st.title("🔒 Acesso Restrito")
+    st.title("� Acesso Restrito")
     try:
         correct_password = st.secrets["passwords"]["senha_mestra"]
     except (AttributeError, KeyError):
