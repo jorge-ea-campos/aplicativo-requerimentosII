@@ -13,10 +13,13 @@ COL_NOME = "Nome completo"
 COL_DISCIPLINA = "disciplina"
 COL_ANO = "Ano"
 COL_SEMESTRE = "Semestre"
+COL_LINK = "link_requerimento"
+COL_PLANO = "plano_estudo"
+
 
 # Colunas obrigatórias nos arquivos de entrada
 REQUIRED_COLS_CONSOLIDADO = [COL_NUSP, COL_DISCIPLINA, COL_ANO, COL_SEMESTRE, COL_PROBLEMA, COL_PARECER]
-REQUIRED_COLS_REQUERIMENTOS = [COL_NUSP, COL_NOME, COL_PROBLEMA]
+REQUIRED_COLS_REQUERIMENTOS = [COL_NUSP, COL_NOME, COL_PROBLEMA, COL_LINK, COL_PLANO]
 
 # --- Configuração da Página e Estado da Sessão ---
 st.set_page_config(
@@ -64,7 +67,7 @@ def find_and_rename_columns(df, target_col_name, possible_names, other_renames=N
     if other_renames:
         for original, new in other_renames.items():
             for col in df.columns:
-                if col.lower().strip() == original:
+                if col.lower().strip() == original.lower().strip():
                     df.rename(columns={col: new}, inplace=True)
                     break
     normalized_possible_names = [name.lower().strip() for name in possible_names]
@@ -187,7 +190,6 @@ def display_student_details(df_requerimentos, df_merged):
     for _, aluno in alunos_unicos.iterrows():
         nusp_aluno = aluno[COL_NUSP]
         with st.expander(f"👤 {aluno[COL_NOME]} (NUSP: {nusp_aluno})"):
-            # Pega os requerimentos atuais deste aluno
             current_requests = df_requerimentos[df_requerimentos[COL_NUSP] == nusp_aluno]
             
             st.markdown("##### 📌 Requerimento(s) no Semestre Atual para Análise")
@@ -196,23 +198,40 @@ def display_student_details(df_requerimentos, df_merged):
             else:
                 for index, request in current_requests.iterrows():
                     problema = request['problema_atual']
-                    # Chave única para o widget usando o índice do DataFrame original
-                    decision_key = f"{nusp_aluno}_{problema}_{index}"
+                    link = request.get(COL_LINK, "")
+                    plano = request.get(COL_PLANO, "")
                     
-                    # Inicializa o estado para este requerimento específico
+                    decision_key = f"{nusp_aluno}_{problema}_{index}"
                     st.session_state.decisions.setdefault(decision_key, {'status': 'Pendente', 'justificativa': ''})
                     
                     st.markdown(f"**Problema/Pedido:** `{problema}`")
+
+                    if pd.notna(link) and str(link).strip():
+                        st.markdown(f"**🔗 Link para o Requerimento:** [Acessar Link]({link})")
+                    else:
+                        st.markdown("**🔗 Link para o Requerimento:** Não informado")
+
+                    if pd.notna(plano) and str(plano).strip():
+                        with st.expander("📄 Ver Plano de Estudo/Presença"):
+                            st.text(plano)
+                    else:
+                        st.markdown("**📄 Plano de Estudo/Presença:** Não informado")
                     
-                    # UI para dar o parecer
-                    status = st.radio("Parecer:", ('Pendente', 'Deferido', 'Indeferido'),
+                    parecer_options = ('Pendente', 'Deferido SG', 'Indeferido SG', 'Para análise COC.')
+                    # Garante que o status antigo seja compatível
+                    current_status = st.session_state.decisions[decision_key]['status']
+                    if current_status not in parecer_options:
+                        current_status = 'Pendente'
+
+                    status = st.radio("Parecer:", parecer_options,
                                       key=f"status_{decision_key}",
-                                      index=['Pendente', 'Deferido', 'Indeferido'].index(st.session_state.decisions[decision_key]['status']),
+                                      index=parecer_options.index(current_status),
                                       horizontal=True)
                     st.session_state.decisions[decision_key]['status'] = status
 
-                    if status == 'Indeferido':
-                        justificativa = st.text_area("Justificativa para o indeferimento:",
+                    if status in ['Indeferido SG', 'Para análise COC.']:
+                        label = "Justificativa para o indeferimento:" if status == 'Indeferido SG' else "Observações para o COC:"
+                        justificativa = st.text_area(label,
                                                      value=st.session_state.decisions[decision_key]['justificativa'],
                                                      key=f"just_{decision_key}")
                         st.session_state.decisions[decision_key]['justificativa'] = justificativa
@@ -220,7 +239,6 @@ def display_student_details(df_requerimentos, df_merged):
                         st.session_state.decisions[decision_key]['justificativa'] = ''
                     st.divider()
 
-            # --- Histórico (como antes) ---
             historico_aluno = df_merged[df_merged[COL_NUSP] == nusp_aluno].copy()
             st.markdown("##### 📜 Histórico Completo de Pedidos")
             historico_aluno['problema_formatado'] = historico_aluno['problema_historico'].apply(format_problem_type)
@@ -233,13 +251,9 @@ def display_student_details(df_requerimentos, df_merged):
 def prepare_export_data(df_req, decisions):
     """Aplica as decisões do parecer ao DataFrame de requerimentos para exportação."""
     df_export = df_req.copy()
-    # Cria uma chave temporária para mapear as decisões
     df_export['decision_key'] = df_export[COL_NUSP].astype(str) + '_' + df_export['problema_atual'].astype(str) + '_' + df_export.index.astype(str)
-    
-    # Mapeia as decisões do estado da sessão para novas colunas
     df_export['parecer_final'] = df_export['decision_key'].map(lambda k: decisions.get(k, {}).get('status', 'Pendente'))
     df_export['justificativa'] = df_export['decision_key'].map(lambda k: decisions.get(k, {}).get('justificativa', ''))
-    
     return df_export.drop(columns=['decision_key'])
 
 # --- Função Principal da Aplicação ---
@@ -256,6 +270,11 @@ def run_app():
 
     if not (file_consolidado and file_requerimentos):
         st.markdown("### 🚀 Bem-vindo! Para começar, faça o upload dos arquivos.")
+        with st.expander("📋 Estrutura esperada dos arquivos"):
+            st.markdown(f"**Consolidado:** `{', '.join(REQUIRED_COLS_CONSOLIDADO)}`")
+            st.markdown(f"**Requerimentos:** `{', '.join(REQUIRED_COLS_REQUERIMENTOS)}`")
+            st.markdown("> A coluna `link_requerimento` deve conter o link (geralmente da coluna G da planilha original).")
+            st.markdown("> A coluna `plano_estudo` deve conter os planos de estudo/presença.")
         return
 
     try:
@@ -271,7 +290,12 @@ def run_app():
             
             possible_nusp = ["nusp", "numero usp", "número usp", "n° usp", "n usp"]
             df_consolidado = find_and_rename_columns(df_consolidado, COL_NUSP, possible_nusp, {COL_PROBLEMA: COL_PROBLEMA})
-            df_requerimentos = find_and_rename_columns(df_requerimentos, COL_NUSP, possible_nusp, {COL_PROBLEMA: COL_PROBLEMA})
+            df_requerimentos = find_and_rename_columns(df_requerimentos, COL_NUSP, possible_nusp, {
+                COL_PROBLEMA: COL_PROBLEMA,
+                "link para o requerimento": COL_LINK,
+                "plano de estudo": COL_PLANO,
+                "plano de presença": COL_PLANO
+            })
             validate_dataframes(df_consolidado, df_requerimentos)
             
             df_consolidado = clean_nusp_column(df_consolidado, "consolidado")
@@ -292,26 +316,19 @@ def run_app():
             display_student_details(df_requerimentos, df_merged)
             st.divider()
 
-            # --- Seção de Exportação ---
             st.markdown("### 📥 Exportar Relatórios")
             df_com_pareceres = prepare_export_data(df_requerimentos, st.session_state.decisions)
-            df_aprovados = df_com_pareceres[df_com_pareceres['parecer_final'] != 'Indeferido'].copy()
+            df_nao_indeferidos = df_com_pareceres[df_com_pareceres['parecer_final'] != 'Indeferido SG'].copy()
 
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("##### Relatório Completo com Pareceres")
-                st.download_button(
-                    label="📥 Baixar como Excel",
-                    data=to_excel(df_com_pareceres),
-                    file_name=f"relatorio_completo_pareceres_{datetime.now().strftime('%Y%m%d')}.xlsx"
-                )
+                st.download_button(label="📥 Baixar como Excel", data=to_excel(df_com_pareceres),
+                                   file_name=f"relatorio_completo_pareceres_{datetime.now().strftime('%Y%m%d')}.xlsx")
             with col2:
                 st.markdown("##### Relatório de Pedidos Não Indeferidos")
-                st.download_button(
-                    label="📥 Baixar como Excel",
-                    data=to_excel(df_aprovados),
-                    file_name=f"relatorio_deferidos_pendentes_{datetime.now().strftime('%Y%m%d')}.xlsx"
-                )
+                st.download_button(label="📥 Baixar como Excel", data=to_excel(df_nao_indeferidos),
+                                   file_name=f"relatorio_nao_indeferidos_{datetime.now().strftime('%Y%m%d')}.xlsx")
         else:
             st.success("✅ Nenhum aluno do semestre atual foi encontrado no histórico de pedidos.")
 
