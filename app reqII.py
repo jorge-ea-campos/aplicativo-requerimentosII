@@ -63,20 +63,54 @@ def load_data(uploaded_file):
             return None
 
 def find_and_rename_columns(df, target_col_name, possible_names, other_renames=None):
-    """Encontra e renomeia colunas para um padrão definido."""
+    """Encontra e renomeia colunas para um padrão definido, evitando duplicatas."""
+    rename_dict = {}
+    
+    # Combina todas as regras de renomeação em uma única estrutura
+    # Ex: {'plano_estudo': ['plano de estudo', 'link plano de estudos'], 'nusp': ['nusp', 'numero usp']}
+    all_rules = {}
     if other_renames:
         for original, new in other_renames.items():
-            for col in df.columns:
-                if col.lower().strip() == original.lower().strip():
-                    df.rename(columns={col: new}, inplace=True)
-                    break
-    normalized_possible_names = [name.lower().strip() for name in possible_names]
+            all_rules.setdefault(new, []).append(original.lower().strip())
+    
+    all_rules.setdefault(target_col_name, []).extend([p.lower().strip() for p in possible_names])
+
+    # Conjuntos para garantir que cada coluna de origem e de destino seja usada apenas uma vez
+    processed_original_cols = set()
+    assigned_target_names = set()
+
+    # Itera através das colunas do DataFrame para encontrar correspondências
     for col in df.columns:
+        if col in processed_original_cols:
+            continue
+        
         normalized_col = col.lower().strip()
-        if normalized_col in normalized_possible_names or (target_col_name == COL_NUSP and any(keyword in normalized_col for keyword in ['nusp', 'numero usp', 'número usp', 'n° usp'])):
-            df.rename(columns={col: target_col_name}, inplace=True)
-            return df
-    raise ValueError(f"Coluna '{target_col_name}' não encontrada. Colunas disponíveis: {', '.join(df.columns.tolist())}")
+        
+        found_match = False
+        for target, originals in all_rules.items():
+            if normalized_col in originals:
+                if target not in assigned_target_names:
+                    rename_dict[col] = target
+                    processed_original_cols.add(col)
+                    assigned_target_names.add(target)
+                    found_match = True
+                    break  # Correspondeu, vá para a próxima coluna do DataFrame
+        
+        # Se nenhuma correspondência exata foi encontrada, verifique por palavras-chave (específico para NUSP)
+        if not found_match and target_col_name == COL_NUSP:
+            if any(keyword in normalized_col for keyword in ['nusp', 'numero usp', 'número usp', 'n° usp']):
+                 if COL_NUSP not in assigned_target_names:
+                    rename_dict[col] = COL_NUSP
+                    processed_original_cols.add(col)
+                    assigned_target_names.add(COL_NUSP)
+
+    df.rename(columns=rename_dict, inplace=True)
+    
+    # A validação final acontece fora, mas verificamos se a coluna principal foi encontrada
+    if target_col_name not in df.columns:
+         raise ValueError(f"Coluna principal '{target_col_name}' não encontrada ou mapeada. Colunas disponíveis: {', '.join(df.columns.tolist())}")
+
+    return df
 
 def validate_dataframes(df_consolidado, df_requerimentos):
     """Verifica se os DataFrames contêm as colunas necessárias."""
