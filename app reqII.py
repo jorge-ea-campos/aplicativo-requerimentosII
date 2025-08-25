@@ -15,7 +15,10 @@ COL_ANO = "Ano"
 COL_SEMESTRE = "Semestre"
 COL_LINK = "link_requerimento"
 COL_PLANO = "plano_estudo"
-COL_PLANO_PRESENCA = "plano_presenca" # Nova constante
+COL_PLANO_PRESENCA = "plano_presenca"
+# Constantes para as colunas de exportação (J e K)
+COL_PARECER_SG = "Parecer Serviço de Graduação"
+COL_OBSERVACAO_SG = "Observação SG"
 
 
 # Colunas obrigatórias nos arquivos de entrada
@@ -67,8 +70,6 @@ def find_and_rename_columns(df, target_col_name, possible_names, other_renames=N
     """Encontra e renomeia colunas para um padrão definido, evitando duplicatas."""
     rename_dict = {}
     
-    # Combina todas as regras de renomeação em uma única estrutura
-    # Ex: {'plano_estudo': ['plano de estudo', 'link plano de estudos'], 'nusp': ['nusp', 'numero usp']}
     all_rules = {}
     if other_renames:
         for original, new in other_renames.items():
@@ -76,11 +77,9 @@ def find_and_rename_columns(df, target_col_name, possible_names, other_renames=N
     
     all_rules.setdefault(target_col_name, []).extend([p.lower().strip() for p in possible_names])
 
-    # Conjuntos para garantir que cada coluna de origem e de destino seja usada apenas uma vez
     processed_original_cols = set()
     assigned_target_names = set()
 
-    # Itera através das colunas do DataFrame para encontrar correspondências
     for col in df.columns:
         if col in processed_original_cols:
             continue
@@ -95,9 +94,8 @@ def find_and_rename_columns(df, target_col_name, possible_names, other_renames=N
                     processed_original_cols.add(col)
                     assigned_target_names.add(target)
                     found_match = True
-                    break  # Correspondeu, vá para a próxima coluna do DataFrame
+                    break
         
-        # Se nenhuma correspondência exata foi encontrada, verifique por palavras-chave (específico para NUSP)
         if not found_match and target_col_name == COL_NUSP:
             if any(keyword in normalized_col for keyword in ['nusp', 'numero usp', 'número usp', 'n° usp']):
                  if COL_NUSP not in assigned_target_names:
@@ -107,7 +105,6 @@ def find_and_rename_columns(df, target_col_name, possible_names, other_renames=N
 
     df.rename(columns=rename_dict, inplace=True)
     
-    # A validação final acontece fora, mas verificamos se a coluna principal foi encontrada
     if target_col_name not in df.columns:
          raise ValueError(f"Coluna principal '{target_col_name}' não encontrada ou mapeada. Colunas disponíveis: {', '.join(df.columns.tolist())}")
 
@@ -247,7 +244,6 @@ def display_student_details(df_requerimentos, df_merged):
                     else:
                         st.markdown("**🔗 Link para o Requerimento:** Não informado")
 
-                    # ALTERAÇÃO: Exibe links para os planos
                     if pd.notna(plano_estudo_link) and str(plano_estudo_link).strip():
                         st.markdown(f"**📄 Link para o Plano de Estudo:** [Acessar Documento]({plano_estudo_link})")
                     else:
@@ -259,7 +255,6 @@ def display_student_details(df_requerimentos, df_merged):
                         st.markdown("**📋 Plano de Presença:** Não informado")
                     
                     parecer_options = ('Pendente', 'Deferido SG', 'Indeferido SG', 'Para análise COC.')
-                    # Garante que o status antigo seja compatível
                     current_status = st.session_state.decisions[decision_key]['status']
                     if current_status not in parecer_options:
                         current_status = 'Pendente'
@@ -270,14 +265,27 @@ def display_student_details(df_requerimentos, df_merged):
                                       horizontal=True)
                     st.session_state.decisions[decision_key]['status'] = status
 
-                    if status in ['Indeferido SG', 'Para análise COC.']:
-                        label = "Justificativa para o indeferimento:" if status == 'Indeferido SG' else "Observações para o COC:"
-                        justificativa = st.text_area(label,
-                                                     value=st.session_state.decisions[decision_key]['justificativa'],
-                                                     key=f"just_{decision_key}")
-                        st.session_state.decisions[decision_key]['justificativa'] = justificativa
+                    if status != 'Pendente':
+                        label = "Justificativa (Opcional):"
+                        if status == 'Deferido SG':
+                            label = "Justificativa para o deferimento:"
+                        elif status == 'Indeferido SG':
+                            label = "Justificativa para o indeferimento:"
+                        elif status == 'Para análise COC.':
+                            label = "Observações para o COC:"
+
+                        justificativa_input = st.text_area(
+                            label,
+                            value=st.session_state.decisions[decision_key]['justificativa'],
+                            key=f"just_input_{decision_key}"
+                        )
+
+                        if st.button("Salvar Justificativa", key=f"save_btn_{decision_key}"):
+                            st.session_state.decisions[decision_key]['justificativa'] = justificativa_input
+                            st.toast("Justificativa salva!", icon="✔️")
                     else:
                         st.session_state.decisions[decision_key]['justificativa'] = ''
+                    
                     st.divider()
 
             historico_aluno = df_merged[df_merged[COL_NUSP] == nusp_aluno].copy()
@@ -290,12 +298,30 @@ def display_student_details(df_requerimentos, df_merged):
 
 # --- Funções de Exportação ---
 def prepare_export_data(df_req, decisions):
-    """Aplica as decisões do parecer ao DataFrame de requerimentos para exportação."""
+    """Aplica as decisões do parecer ao DataFrame de requerimentos para exportação,
+    atualizando as colunas J (Parecer) e K (Observação)."""
     df_export = df_req.copy()
+
+    # Garante que as colunas de destino existam, preenchendo com os valores originais se disponíveis
+    if COL_PARECER_SG not in df_export.columns:
+        df_export[COL_PARECER_SG] = ""
+    if COL_OBSERVACAO_SG not in df_export.columns:
+        df_export[COL_OBSERVACAO_SG] = ""
+
+    # Cria colunas temporárias para mapear as decisões da sessão
     df_export['decision_key'] = df_export[COL_NUSP].astype(str) + '_' + df_export['problema_atual'].astype(str) + '_' + df_export.index.astype(str)
-    df_export['parecer_final'] = df_export['decision_key'].map(lambda k: decisions.get(k, {}).get('status', 'Pendente'))
-    df_export['justificativa'] = df_export['decision_key'].map(lambda k: decisions.get(k, {}).get('justificativa', ''))
-    return df_export.drop(columns=['decision_key'])
+    df_export['parecer_temp'] = df_export['decision_key'].map(lambda k: decisions.get(k, {}).get('status', 'Pendente'))
+    df_export['justificativa_temp'] = df_export['decision_key'].map(lambda k: decisions.get(k, {}).get('justificativa', ''))
+
+    # Atualiza as colunas de destino apenas onde uma decisão foi tomada na sessão
+    mask = df_export['parecer_temp'] != 'Pendente'
+    df_export.loc[mask, COL_PARECER_SG] = df_export.loc[mask, 'parecer_temp']
+    df_export.loc[mask, COL_OBSERVACAO_SG] = df_export.loc[mask, 'justificativa_temp']
+
+    # Remove colunas temporárias antes de exportar
+    df_export = df_export.drop(columns=['decision_key', 'parecer_temp', 'justificativa_temp'])
+    
+    return df_export
 
 # --- Função Principal da Aplicação ---
 def run_app():
@@ -338,7 +364,9 @@ def run_app():
                 "plano de estudo": COL_PLANO,
                 "link plano de estudos": COL_PLANO,
                 "plano de presença": COL_PLANO_PRESENCA,
-                "link plano de presença": COL_PLANO_PRESENCA
+                "link plano de presença": COL_PLANO_PRESENCA,
+                # Adiciona o mapeamento para a coluna de observação existente
+                "observação sg": COL_OBSERVACAO_SG
             })
             validate_dataframes(df_consolidado, df_requerimentos)
             
@@ -362,7 +390,9 @@ def run_app():
 
             st.markdown("### 📥 Exportar Relatórios")
             df_com_pareceres = prepare_export_data(df_requerimentos, st.session_state.decisions)
-            df_nao_indeferidos = df_com_pareceres[df_com_pareceres['parecer_final'] != 'Indeferido SG'].copy()
+            
+            # Filtra o dataframe final com base na coluna de parecer do SG
+            df_nao_indeferidos = df_com_pareceres[df_com_pareceres[COL_PARECER_SG] != 'Indeferido SG'].copy()
 
             col1, col2 = st.columns(2)
             with col1:
