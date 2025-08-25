@@ -249,7 +249,6 @@ def display_student_details(df_requerimentos, df_merged):
     st.markdown("### 📋 Análise de Requerimentos por Aluno")
     st.info("Clique no nome para ver o histórico e dar o parecer nos pedidos atuais.")
     
-    # ALTERAÇÃO: Itera sobre todos os alunos do arquivo de requerimentos
     alunos_unicos = df_requerimentos[[COL_NUSP, COL_NOME]].drop_duplicates().sort_values(COL_NOME)
 
     for _, aluno in alunos_unicos.iterrows():
@@ -262,15 +261,17 @@ def display_student_details(df_requerimentos, df_merged):
                 st.write("Nenhum requerimento encontrado para este aluno no arquivo atual.")
             else:
                 for index, request in current_requests.iterrows():
-                    problema = request['problema_atual']
                     link = request.get(COL_LINK, "")
                     plano_estudo_link = request.get(COL_PLANO, "")
                     plano_presenca_link = request.get(COL_PLANO_PRESENCA, "")
                     
-                    decision_key = f"{nusp_aluno}_{problema}_{index}"
+                    # CORREÇÃO: A chave agora usa apenas o índice, que é garantido ser único.
+                    decision_key = f"req_{index}"
                     st.session_state.decisions.setdefault(decision_key, {'status': 'Pendente', 'justificativa': ''})
                     
-                    st.markdown(f"**Problema/Pedido:** `{problema}`")
+                    # O problema é exibido, mas não usado na chave para evitar colisões com NaN
+                    problema_display = request.get('problema_atual', 'Não especificado')
+                    st.markdown(f"**Problema/Pedido:** `{problema_display}`")
 
                     if pd.notna(link) and str(link).strip():
                         st.markdown(f"**🔗 Link para o Requerimento:** [Acessar Link]({link})")
@@ -321,11 +322,9 @@ def display_student_details(df_requerimentos, df_merged):
                     
                     st.divider()
 
-            # Lógica para exibir o histórico
             historico_aluno = df_merged[df_merged[COL_NUSP] == nusp_aluno].copy()
             st.markdown("##### 📜 Histórico Completo de Pedidos")
             
-            # ALTERAÇÃO: Verifica se o histórico não está vazio
             if not historico_aluno.empty and not historico_aluno['disciplina_historico'].isnull().all():
                 historico_aluno['problema_formatado'] = historico_aluno['problema_historico'].apply(format_problem_type)
                 historico_aluno['parecer_formatado'] = historico_aluno['parecer_historico'].apply(format_parecer)
@@ -338,8 +337,7 @@ def display_student_details(df_requerimentos, df_merged):
 
 # --- Funções de Exportação ---
 def prepare_export_data(df_req, decisions):
-    """Aplica as decisões do parecer ao DataFrame de requerimentos para exportação,
-    atualizando as colunas J (Parecer) e K (Observação)."""
+    """Aplica as decisões do parecer ao DataFrame de requerimentos para exportação."""
     df_export = df_req.copy()
 
     if COL_PARECER_SG not in df_export.columns:
@@ -347,7 +345,8 @@ def prepare_export_data(df_req, decisions):
     if COL_OBSERVACAO_SG not in df_export.columns:
         df_export[COL_OBSERVACAO_SG] = ""
 
-    df_export['decision_key'] = df_export[COL_NUSP].astype(str) + '_' + df_export['problema_atual'].astype(str) + '_' + df_export.index.astype(str)
+    # CORREÇÃO: A chave de decisão agora é baseada apenas no índice
+    df_export['decision_key'] = "req_" + df_export.index.astype(str)
     df_export['parecer_temp'] = df_export['decision_key'].map(lambda k: decisions.get(k, {}).get('status', 'Pendente'))
     df_export['justificativa_temp'] = df_export['decision_key'].map(lambda k: decisions.get(k, {}).get('justificativa', ''))
 
@@ -430,14 +429,11 @@ def run_app():
             df_consolidado.rename(columns=cols_hist, inplace=True)
             df_requerimentos.rename(columns={COL_PROBLEMA: 'problema_atual'}, inplace=True)
 
-            # ALTERAÇÃO: Usa 'left' merge para manter todos os alunos do semestre atual
             df_merged = df_requerimentos.merge(df_consolidado, on=COL_NUSP, how="left")
             
-            # Para métricas, usamos apenas os que têm histórico
             df_merged_with_history = df_merged.dropna(subset=['disciplina_historico'])
             metrics = calculate_metrics(df_merged_with_history)
 
-        # A exibição principal agora usa o df_merged completo
         display_metrics(df_requerimentos, df_merged_with_history, metrics)
         st.divider()
         if not df_merged_with_history.empty:
@@ -468,7 +464,7 @@ def run_app():
 
 # --- Ponto de Entrada e Autenticação ---
 def login_form():
-    st.title("� Acesso Restrito")
+    st.title("🔒 Acesso Restrito")
     try:
         correct_password = st.secrets["passwords"]["senha_mestra"]
     except (AttributeError, KeyError):
