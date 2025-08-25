@@ -491,3 +491,4 @@ if not st.session_state["password_correct"]:
 # Se o usuário estiver logado, executa o aplicativo principal
 else:
     run_app()
+
